@@ -239,6 +239,7 @@ type Bootstrap interface {
 	ListenAndServePodResources()
 	Run(<-chan kubetypes.PodUpdate)
 	RunOnce(<-chan kubetypes.PodUpdate) ([]RunPodResult, error)
+	UpdateMachineInfo()
 }
 
 // Dependencies is a bin for things we might consider "injected dependencies" -- objects constructed
@@ -2921,4 +2922,18 @@ func (kl *Kubelet) PrepareDynamicResources(pod *v1.Pod) error {
 // This method implements the RuntimeHelper interface
 func (kl *Kubelet) UnprepareDynamicResources(pod *v1.Pod) error {
 	return kl.containerManager.UnprepareDynamicResources(pod)
+}
+
+// UpdateMachineInfo fetches latest machine configurations and updates the cache
+func (kl *Kubelet) UpdateMachineInfo() {
+	klog.Info("Fetching and updating machine info")
+	machineInfo, err := kl.cadvisor.MachineInfo()
+	if err != nil {
+		klog.ErrorS(err, "Error fetching machine info")
+		return
+	}
+	// Avoid collector collects it as a timestamped metric
+	// See PR #95210 and #97006 for more details.
+	machineInfo.Timestamp = time.Time{}
+	kl.setCachedMachineInfo(machineInfo)
 }

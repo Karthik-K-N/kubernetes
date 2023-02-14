@@ -1174,6 +1174,8 @@ func startKubelet(k kubelet.Bootstrap, podCfg *config.PodConfig, kubeCfg *kubele
 	// start the kubelet
 	go k.Run(podCfg.Updates())
 
+	go wait.Until(k.UpdateMachineInfo, time.Minute, wait.NeverStop)
+
 	// start the kubelet server
 	if enableServer {
 		go k.ListenAndServe(kubeCfg, kubeDeps.TLSOptions, kubeDeps.Auth, kubeDeps.TracerProvider)
