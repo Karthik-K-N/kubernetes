@@ -2926,7 +2926,7 @@ func (kl *Kubelet) UnprepareDynamicResources(pod *v1.Pod) error {
 
 // UpdateMachineInfo fetches latest machine configurations and updates the cache
 func (kl *Kubelet) UpdateMachineInfo() {
-	klog.Info("Fetching and updating machine info")
+	klog.InfoS("Fetching and updating machine info")
 	machineInfo, err := kl.cadvisor.MachineInfo()
 	if err != nil {
 		klog.ErrorS(err, "Error fetching machine info")
