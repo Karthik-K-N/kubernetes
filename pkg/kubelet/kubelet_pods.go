@@ -1043,6 +1043,18 @@ func (kl *Kubelet) HandlePodCleanups(ctx context.Context) error {
 	metrics.ActivePodCount.WithLabelValues("true").Set(float64(len(activeStaticPods)))
 	metrics.MirrorPodCount.Set(float64(len(mirrorPods)))
 
+	machineInfo, err := kl.cadvisor.MachineInfo()
+	if err != nil {
+		klog.ErrorS(err, "Error fetching machine info")
+	} else {
+		cachedMachineInfo, _ := kl.GetCachedMachineInfo()
+		kl.setCachedMachineInfo(machineInfo)
+		if machineInfo.NumCores < cachedMachineInfo.NumCores || machineInfo.MemoryCapacity < cachedMachineInfo.MemoryCapacity {
+			klog.Info("Observed shrink in nod resources, rerunning pod admission")
+			kl.HandlePodAdditions(activePods)
+		}
+	}
+
 	// Pod phase progresses monotonically. Once a pod has reached a final state,
 	// it should never leave regardless of the restart policy. The statuses
 	// of such pods should not be changed, and there is no need to sync them.
