@@ -21,7 +21,7 @@ import (
 	"time"
 
 	cadvisorapi "github.com/google/cadvisor/info/v1"
-	v1 "k8s.io/api/core/v1"
+	"k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager/bitmask"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
@@ -67,7 +67,7 @@ type Manager interface {
 	// Store is the interface for storing pod topology hints
 	Store
 	// Sync will sync the Topology Manager with the latest machine info
-	Sync(machineInfo *cadvisorapi.MachineInfo) error
+	Sync(machineInfo *cadvisorapi.MachineInfo, topologyManagerPolicy string, topologyManagerScope string, topologyManagerPolicyOptions map[string]string) error
 }
 
 type manager struct {
@@ -140,50 +140,10 @@ func NewManager(topology []cadvisorapi.Node, topologyPolicyName string, topology
 		klog.InfoS("Creating topology manager with none policy")
 		return &manager{scope: NewNoneScope()}, nil
 	}
-
-	opts, err := NewPolicyOptions(topologyPolicyOptions)
+	klog.InfoS("Creating topology manager with policy per scope", "topologyPolicyName", topologyPolicyName, "topologyScopeName", topologyScopeName, "topologyPolicyOptions", opts)
+	scope, err := newTopologyScope(topology, topologyPolicyName, topologyScopeName, topologyPolicyOptions)
 	if err != nil {
 		return nil, err
-	}
-
-	klog.InfoS("Creating topology manager with policy per scope", "topologyPolicyName", topologyPolicyName, "topologyScopeName", topologyScopeName, "topologyPolicyOptions", opts)
-
-	numaInfo, err := NewNUMAInfo(topology, opts)
-	if err != nil {
-		return nil, fmt.Errorf("cannot discover NUMA topology: %w", err)
-	}
-
-	if topologyPolicyName != PolicyNone && len(numaInfo.Nodes) > maxAllowableNUMANodes {
-		return nil, fmt.Errorf("unsupported on machines with more than %v NUMA Nodes", maxAllowableNUMANodes)
-	}
-
-	var policy Policy
-	switch topologyPolicyName {
-
-	case PolicyBestEffort:
-		policy = NewBestEffortPolicy(numaInfo, opts)
-
-	case PolicyRestricted:
-		policy = NewRestrictedPolicy(numaInfo, opts)
-
-	case PolicySingleNumaNode:
-		policy = NewSingleNumaNodePolicy(numaInfo, opts)
-
-	default:
-		return nil, fmt.Errorf("unknown policy: \"%s\"", topologyPolicyName)
-	}
-
-	var scope Scope
-	switch topologyScopeName {
-
-	case containerTopologyScope:
-		scope = NewContainerScope(policy)
-
-	case podTopologyScope:
-		scope = NewPodScope(policy)
-
-	default:
-		return nil, fmt.Errorf("unknown scope: \"%s\"", topologyScopeName)
 	}
 
 	manager := &manager{
@@ -213,10 +173,6 @@ func (m *manager) RemoveContainer(containerID string) error {
 	return m.scope.RemoveContainer(containerID)
 }
 
-func (m *manager) Sync(machineInfo *cadvisorapi.MachineInfo) error {
-	return nil
-}
-
 func (m *manager) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAdmitResult {
 	klog.InfoS("Topology Admit Handler", "podUID", attrs.Pod.UID, "podNamespace", attrs.Pod.Namespace, "podName", attrs.Pod.Name)
 	metrics.TopologyManagerAdmissionRequestsTotal.Inc()
@@ -226,4 +182,62 @@ func (m *manager) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAdmitR
 	metrics.TopologyManagerAdmissionDuration.Observe(float64(time.Since(startTime).Milliseconds()))
 
 	return podAdmitResult
+}
+
+func (m *manager) Sync(machineInfo *cadvisorapi.MachineInfo, topologyPolicyName string, topologyScopeName string, topologyPolicyOptions map[string]string) error {
+	scope, err := newTopologyScope(machineInfo.Topology, topologyPolicyName, topologyScopeName, topologyPolicyOptions)
+	if err != nil {
+		return err
+	}
+	m.scope = scope
+	return nil
+}
+
+func newTopologyScope(topology []cadvisorapi.Node, topologyPolicyName string, topologyScopeName string, topologyPolicyOptions map[string]string) (Scope, error) {
+	opts, err := NewPolicyOptions(topologyPolicyOptions)
+	if err != nil {
+		return nil, err
+	}
+
+	numaInfo, err := NewNUMAInfo(topology, opts)
+	if err != nil {
+		return nil, fmt.Errorf("cannot discover NUMA topology: %w", err)
+	}
+
+	if topologyPolicyName != PolicyNone && len(numaInfo.Nodes) > maxAllowableNUMANodes {
+		return nil, fmt.Errorf("unsupported on machines with more than %v NUMA Nodes", maxAllowableNUMANodes)
+	}
+
+	var policy Policy
+	switch topologyPolicyName {
+
+	case PolicyNone:
+		policy = NewNonePolicy()
+
+	case PolicyBestEffort:
+		policy = NewBestEffortPolicy(numaInfo, opts)
+
+	case PolicyRestricted:
+		policy = NewRestrictedPolicy(numaInfo, opts)
+
+	case PolicySingleNumaNode:
+		policy = NewSingleNumaNodePolicy(numaInfo, opts)
+
+	default:
+		return nil, fmt.Errorf("unknown policy: \"%s\"", topologyPolicyName)
+	}
+
+	var scope Scope
+	switch topologyScopeName {
+
+	case containerTopologyScope:
+		scope = NewContainerScope(policy)
+
+	case podTopologyScope:
+		scope = NewPodScope(policy)
+
+	default:
+		return nil, fmt.Errorf("unknown scope: \"%s\"", topologyScopeName)
+	}
+	return scope, nil
 }

@@ -1152,7 +1152,7 @@ func (kl *Kubelet) HandlePodCleanups(ctx context.Context) error {
 	metrics.ActivePodCount.WithLabelValues("true").Set(float64(len(activeStaticPods)))
 	metrics.MirrorPodCount.Set(float64(len(mirrorPods)))
 
-	if kl.kubeletConfiguration.DynamicNodeResize {
+	if utilfeature.DefaultFeatureGate.Enabled(features.DynamicNodeResize) {
 		// Handle the node dynamic resize
 		machineInfo, err := kl.cadvisor.MachineInfo()
 		if err != nil {
@@ -1166,12 +1166,6 @@ func (kl *Kubelet) HandlePodCleanups(ctx context.Context) error {
 				// Resync the resource managers
 				if err := kl.ResyncComponents(machineInfo); err != nil {
 					klog.ErrorS(err, "Error resyncing the kubelet components with machine info")
-				}
-
-				// Rerun pod admission only in case of shrink in cluster resources
-				if machineInfo.NumCores < cachedMachineInfo.NumCores || machineInfo.MemoryCapacity < cachedMachineInfo.MemoryCapacity {
-					klog.InfoS("Observed shrink in nod resources, rerunning pod admission")
-					kl.HandlePodAdditions(activePods)
 				}
 			}
 		}

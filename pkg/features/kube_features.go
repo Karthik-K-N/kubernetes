@@ -888,7 +888,7 @@ const (
 
 	// owner: @Karthik-K-N
 	// kep: http://kep.k8s.io/3953
-	// alpha: v1.28
+	// alpha: v1.32
 	//
 	// Enables Dynamic Node Resize
 	DynamicNodeResize featuregate.Feature = "DynamicNodeResize"
