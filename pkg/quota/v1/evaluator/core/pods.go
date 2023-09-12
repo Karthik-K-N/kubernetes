@@ -37,7 +37,6 @@ import (
 	api "k8s.io/kubernetes/pkg/apis/core"
 	k8s_api_v1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	"k8s.io/kubernetes/pkg/apis/core/v1/helper"
-	"k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	"k8s.io/kubernetes/pkg/features"
 )
 
@@ -375,7 +374,7 @@ func PodUsageFunc(obj runtime.Object, clock clock.Clock) (corev1.ResourceList, e
 }
 
 func isBestEffort(pod *corev1.Pod) bool {
-	return qos.GetPodQOS(pod) == corev1.PodQOSBestEffort
+	return pod.Status.QOSClass == corev1.PodQOSBestEffort
 }
 
 func isTerminating(pod *corev1.Pod) bool {

@@ -37,7 +37,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
-	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	schedutil "k8s.io/kubernetes/pkg/scheduler/util"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2enode "k8s.io/kubernetes/test/e2e/framework/node"
@@ -502,7 +501,7 @@ func computeCPUMemFraction(node v1.Node, resource *v1.ResourceRequirements, pods
 	for _, pod := range pods {
 		framework.Logf("Pod for on the node: %v, Cpu: %v, Mem: %v", pod.Name, getNonZeroRequests(pod).MilliCPU, getNonZeroRequests(pod).Memory)
 		// Ignore best effort pods while computing fractions as they won't be taken in account by scheduler.
-		if v1qos.GetPodQOS(pod) == v1.PodQOSBestEffort {
+		if pod.Status.QOSClass == v1.PodQOSBestEffort {
 			continue
 		}
 		totalRequestedCPUResource += getNonZeroRequests(pod).MilliCPU

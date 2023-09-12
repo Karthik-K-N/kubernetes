@@ -514,12 +514,23 @@ func TestSize(t *testing.T) {
 	est := &CostEstimator{SizeEstimator: &testCostEstimator{}}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+
+			fmt.Println(tc.name)
+			fmt.Println(tc.function)
+			fmt.Println(tc.targetSize)
+			fmt.Println(tc.argSizes)
+			fmt.Println(tc.expectSize)
+
 			var targetNode checker.AstNode = testSizeNode{size: tc.targetSize}
 			argNodes := make([]checker.AstNode, len(tc.argSizes))
 			for i, arg := range tc.argSizes {
 				argNodes[i] = testSizeNode{size: arg}
 			}
+			fmt.Println("targetNode", targetNode)
+			fmt.Println("argnodes", argNodes)
 			result := est.EstimateCallCost(tc.function, tc.overload, &targetNode, argNodes)
+			fmt.Printf("%+v\n", result)
+			fmt.Printf("%v", *result.ResultSize)
 			if result.ResultSize == nil {
 				t.Fatalf("Expected ResultSize but got none")
 			}
@@ -554,12 +565,15 @@ type testCostEstimator struct {
 }
 
 func (t *testCostEstimator) EstimateSize(element checker.AstNode) *checker.SizeEstimate {
+	fmt.Println("Is it comint here")
 	switch t := element.Type().TypeKind.(type) {
 	case *expr.Type_Primitive:
 		switch t.Primitive {
 		case expr.Type_STRING:
+			fmt.Println("here")
 			return &checker.SizeEstimate{Min: 0, Max: 12}
 		case expr.Type_BYTES:
+			fmt.Println("there")
 			return &checker.SizeEstimate{Min: 0, Max: 12}
 		}
 	}

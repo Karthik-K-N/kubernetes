@@ -29,7 +29,6 @@ import (
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/klog/v2"
-	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
 )
 
@@ -99,10 +98,9 @@ func (m *podContainerManagerImpl) EnsureExists(pod *v1.Pod) error {
 
 // GetPodContainerName returns the CgroupName identifier, and its literal cgroupfs form on the host.
 func (m *podContainerManagerImpl) GetPodContainerName(pod *v1.Pod) (CgroupName, string) {
-	podQOS := v1qos.GetPodQOS(pod)
 	// Get the parent QOS container name
 	var parentContainer CgroupName
-	switch podQOS {
+	switch pod.Status.QOSClass {
 	case v1.PodQOSGuaranteed:
 		parentContainer = m.qosContainersInfo.Guaranteed
 	case v1.PodQOSBurstable:

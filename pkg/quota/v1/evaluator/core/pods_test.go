@@ -693,7 +693,9 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 		wantSelectors []corev1.ScopedResourceSelectorRequirement
 	}{
 		"EmptyPod": {
-			pod: &api.Pod{},
+			pod: &api.Pod{
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
+			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeNotTerminating},
 				{ScopeName: corev1.ResourceQuotaScopeBestEffort},
@@ -704,6 +706,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 				Spec: api.PodSpec{
 					PriorityClassName: "class1",
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeNotTerminating},
@@ -740,6 +743,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 				Spec: api.PodSpec{
 					ActiveDeadlineSeconds: &activeDeadlineSeconds,
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},
@@ -771,6 +775,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 						},
 					},
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},
@@ -790,6 +795,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 						},
 					},
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},
@@ -809,6 +815,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 						},
 					},
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},
@@ -828,6 +835,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 						},
 					},
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},
@@ -847,6 +855,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 						},
 					},
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},
@@ -866,6 +875,7 @@ func TestPodEvaluatorMatchingScopes(t *testing.T) {
 						},
 					},
 				},
+				Status: api.PodStatus{QOSClass: api.PodQOSBestEffort},
 			},
 			wantSelectors: []corev1.ScopedResourceSelectorRequirement{
 				{ScopeName: corev1.ResourceQuotaScopeTerminating},

@@ -31,7 +31,6 @@ import (
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/api/v1/resource"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
-	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	kubefeatures "k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/cm/util"
 )
@@ -165,7 +164,7 @@ func ResourceConfigForPod(pod *v1.Pod, enforceCPULimits bool, cpuPeriod uint64, 
 	}
 
 	// determine the qos class
-	qosClass := v1qos.GetPodQOS(pod)
+	qosClass := pod.Status.QOSClass
 
 	// build the result
 	result := &ResourceConfig{}

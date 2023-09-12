@@ -35,7 +35,6 @@ import (
 
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	resourcehelper "k8s.io/kubernetes/pkg/api/v1/resource"
-	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	"k8s.io/kubernetes/pkg/features"
 	evictionapi "k8s.io/kubernetes/pkg/kubelet/eviction/api"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
@@ -151,7 +150,7 @@ func (m *managerImpl) Admit(attrs *lifecycle.PodAdmitAttributes) lifecycle.PodAd
 	// Conditions other than memory pressure reject all pods
 	nodeOnlyHasMemoryPressureCondition := hasNodeCondition(m.nodeConditions, v1.NodeMemoryPressure) && len(m.nodeConditions) == 1
 	if nodeOnlyHasMemoryPressureCondition {
-		notBestEffort := v1.PodQOSBestEffort != v1qos.GetPodQOS(attrs.Pod)
+		notBestEffort := v1.PodQOSBestEffort != attrs.Pod.Status.QOSClass
 		if notBestEffort {
 			return lifecycle.PodAdmitResult{Admit: true}
 		}
