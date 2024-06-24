@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	sysruntime "runtime"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -607,6 +608,27 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	if err != nil {
 		return nil, err
 	}
+
+	klog.Info("Fetching machine info via CRI")
+	memory, cpu, err := getMachineInfoFromCRI(kubeDeps.RemoteRuntimeService)
+	if err != nil {
+		klog.Errorf("failed to fetch machine info from CRI %v", err)
+	} else {
+		klog.Infof("Fetched memory %s and cpu %s from CRI", memory, cpu)
+		mem, err := strconv.ParseUint(memory, 10, 64)
+		if err != nil {
+			klog.Error("failed to convert memory to uint")
+		} else {
+			machineInfo.MemoryCapacity = mem
+		}
+		c, err := strconv.ParseInt(cpu, 10, 64)
+		if err != nil {
+			klog.Error("failed to convert cpu to int")
+		} else {
+			machineInfo.NumCores = int(c)
+		}
+	}
+
 	// Avoid collector collects it as a timestamped metric
 	// See PR #95210 and #97006 for more details.
 	machineInfo.Timestamp = time.Time{}
@@ -955,6 +977,38 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	klet.setNodeStatusFuncs = klet.defaultNodeStatusFuncs()
 
 	return klet, nil
+}
+
+//TODO: Fix me
+
+func getMachineInfoFromCRI(rs internalapi.RuntimeService) (string, string, error) {
+	runtimConfigChan := make(chan *runtimeapi.DynamicRuntimeConfigResponse, 1000)
+	go func() {
+		err := rs.GetDynamicRuntimeConfig(runtimConfigChan)
+		if err != nil {
+			fmt.Println("error GetDynamicRuntimeConfig", err)
+		}
+	}()
+	
+	for {
+		select {
+		case rc := <-runtimConfigChan:
+			var memory, cpu string
+			for _, zone := range rc.GetResourceTopology().GetZones() {
+				for _, resource := range zone.GetResources() {
+					if resource.Name == "cpu" {
+						cpu = resource.GetCapacity().GetString_()
+					}
+					if resource.Name == "memory" {
+						memory = resource.GetCapacity().GetString_()
+					}
+				}
+			}
+			return memory, cpu, nil
+		case <-time.After(time.Minute * 5):
+			return "", "", fmt.Errorf("timed out fetching machine info from CRI")
+		}
+	}
 }
 
 type serviceLister interface {

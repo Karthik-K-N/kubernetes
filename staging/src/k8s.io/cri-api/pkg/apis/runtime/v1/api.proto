@@ -140,6 +140,10 @@ service RuntimeService {
     //   The Kubelet will not re-request the RuntimeConfiguration after startup, and CRI implementations should
     //   avoid updating them without a full node reboot.
     rpc RuntimeConfig(RuntimeConfigRequest) returns (RuntimeConfigResponse) {}
+
+    // GetDynamicRuntimeConfig is a streaming interface for receiving dynamically
+    // changing runtime and node configuration
+    rpc GetDynamicRuntimeConfig(DynamicRuntimeConfigRequest) returns (stream DynamicRuntimeConfigResponse) {}
 }
 
 // ImageService defines the public APIs for managing images.
@@ -1946,3 +1950,43 @@ enum CgroupDriver {
     CGROUPFS = 1;
 }
 
+message DynamicRuntimeConfigRequest{}
+
+message DynamicRuntimeConfigResponse {
+    ResourceTopology resource_topology = 1;
+}
+
+message ResourceTopology {
+    repeated ResourceTopologyZone zones = 1;
+}
+
+message ResourceTopologyZone {
+    string name = 1;
+    ResourceTopologyZoneType type = 2;
+    string parent = 3;
+    repeated ResourceTopologyCost costs = 4;
+    map<string, string> attributes = 5;
+    repeated ResourceTopologyResourceInfo resources = 6;
+}
+
+enum ResourceTopologyZoneType {
+    CORE = 0;
+    CLUSTER = 1;
+    DIE = 2;
+    NUMANODE = 3; 
+    PACKAGE = 4;
+}
+
+message ResourceTopologyCost {
+    string name = 1;
+    uint32 value = 2;
+}
+
+message ResourceTopologyResourceInfo {
+    string name = 1;
+    Quantity capacity = 2;
+}
+
+message Quantity {
+  string string = 1;
+}
