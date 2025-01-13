@@ -366,3 +366,7 @@ func (f *RemoteRuntime) RuntimeConfig(ctx context.Context, req *kubeapi.RuntimeC
 
 	return resp, nil
 }
+
+func (f *RemoteRuntime) GetDynamicRuntimeConfig(*kubeapi.DynamicRuntimeConfigRequest, kubeapi.RuntimeService_GetDynamicRuntimeConfigServer) error {
+	return nil
+}
