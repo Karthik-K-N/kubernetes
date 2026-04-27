@@ -37,7 +37,6 @@ import (
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/allocation/state"
 	"k8s.io/kubernetes/pkg/kubelet/config"
-	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/events"
 	"k8s.io/kubernetes/pkg/kubelet/lifecycle"
 	"k8s.io/kubernetes/pkg/kubelet/metrics"
@@ -76,14 +75,6 @@ type Manager interface {
 	// SetAllocatedResources checkpoints the resources allocated to a pod's containers.
 	SetAllocatedResources(allocatedPod *v1.Pod) error
 
-	// AddPodAdmitHandlers adds the admit handlers to the allocation manager.
-	// TODO: See if we can remove this and just add them in the allocation manager constructor.
-	AddPodAdmitHandlers(handlers lifecycle.PodAdmitHandlers)
-
-	// SetContainerRuntime sets the allocation manager's container runtime.
-	// TODO: See if we can remove this and just add it in the allocation manager constructor.
-	SetContainerRuntime(runtime kubecontainer.Runtime)
-
 	// AddPod checks if a pod can be admitted. If so, it admits the pod and updates the allocation.
 	// The function returns a boolean value indicating whether the pod
 	// can be admitted, a brief single-word reason and a message explaining why
@@ -115,10 +106,10 @@ type Manager interface {
 type manager struct {
 	allocated state.State
 
-	admitHandlers    lifecycle.PodAdmitHandlers
-	containerRuntime kubecontainer.Runtime
-	statusManager    status.Manager
-	sourcesReady     config.SourcesReady
+	getAdmitHandlers func() lifecycle.PodAdmitHandlers
+
+	statusManager status.Manager
+	sourcesReady  config.SourcesReady
 
 	ticker         *time.Ticker
 	triggerPodSync func(pod *v1.Pod)
@@ -138,15 +129,16 @@ func NewManager(checkpointDirectory string,
 	getPodByUID func(types.UID) (*v1.Pod, bool),
 	sourcesReady config.SourcesReady,
 	recorder record.EventRecorderLogger,
+	getAdmitHandlers func() lifecycle.PodAdmitHandlers,
 ) Manager {
 	// Use klog.TODO() because we currently do not have a proper logger to pass in.
 	// Replace this with an appropriate logger when refactoring this function to accept a logger parameter.
 	logger := klog.TODO()
 	return &manager{
-		allocated: newStateImpl(logger, checkpointDirectory, allocatedPodsStateFile),
+		allocated:        newStateImpl(logger, checkpointDirectory, allocatedPodsStateFile),
+		getAdmitHandlers: getAdmitHandlers,
 
 		statusManager: statusManager,
-		admitHandlers: lifecycle.PodAdmitHandlers{},
 		sourcesReady:  sourcesReady,
 
 		ticker:         time.NewTicker(initialRetryDelay),
@@ -182,12 +174,13 @@ func NewInMemoryManager(
 	getPodByUID func(types.UID) (*v1.Pod, bool),
 	sourcesReady config.SourcesReady,
 	recorder record.EventRecorderLogger,
+	getAdmitHandlers func() lifecycle.PodAdmitHandlers,
 ) Manager {
 	return &manager{
-		allocated: state.NewStateMemory(nil),
+		allocated:        state.NewStateMemory(nil),
+		getAdmitHandlers: getAdmitHandlers,
 
 		statusManager: statusManager,
-		admitHandlers: lifecycle.PodAdmitHandlers{},
 		sourcesReady:  sourcesReady,
 
 		ticker:         time.NewTicker(initialRetryDelay),
@@ -508,16 +501,6 @@ func allocationFromPod(pod *v1.Pod) state.PodResourceInfo {
 	return podAlloc
 }
 
-func (m *manager) AddPodAdmitHandlers(handlers lifecycle.PodAdmitHandlers) {
-	for _, a := range handlers {
-		m.admitHandlers.AddPodAdmitHandler(a)
-	}
-}
-
-func (m *manager) SetContainerRuntime(runtime kubecontainer.Runtime) {
-	m.containerRuntime = runtime
-}
-
 func (m *manager) AddPod(activePods []*v1.Pod, pod *v1.Pod) (bool, string, string) {
 	// Use klog.TODO() because we currently do not have a proper logger to pass in.
 	// Replace this with an appropriate logger when refactoring this function to accept a logger parameter.
@@ -614,7 +597,7 @@ func (m *manager) canAdmitPod(logger klog.Logger, allocatedPods []*v1.Pod, pod *
 
 	// If any handler rejects, the pod is rejected.
 	attrs := &lifecycle.PodAdmitAttributes{Pod: pod, OtherPods: allocatedPods, Operation: operation}
-	for _, podAdmitHandler := range m.admitHandlers {
+	for _, podAdmitHandler := range m.getAdmitHandlers() {
 		if result := podAdmitHandler.Admit(attrs); !result.Admit {
 			logger.Info("Pod admission denied", "podUID", attrs.Pod.UID, "pod", klog.KObj(attrs.Pod), "reason", result.Reason, "message", result.Message, "operation", operation)
 			return false, result.Reason, result.Message

@@ -1722,7 +1722,12 @@ func TestAllocationManagerAddPodWithPLR(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodLevelResourcesVerticalScaling, tc.ipprPLRFeatureGate)
-			allocationManager := makeAllocationManager(t, &containertest.FakeRuntime{}, []*v1.Pod{}, nil)
+
+			var extraHandlers []lifecycle.PodAdmitHandler
+			if tc.admitFunc != nil {
+				extraHandlers = append(extraHandlers, &testPodAdmitHandler{admitFunc: tc.admitFunc})
+			}
+			allocationManager := makeAllocationManager(t, &containertest.FakeRuntime{}, []*v1.Pod{}, nil, extraHandlers...)
 
 			podForAllocation := func(uid types.UID, resources resourceState) *v1.Pod {
 				pod := &v1.Pod{
@@ -1744,11 +1749,6 @@ func TestAllocationManagerAddPodWithPLR(t *testing.T) {
 			for podUID, resources := range tc.initialAllocatedResourcesState {
 				err := allocationManager.SetAllocatedResources(podForAllocation(podUID, resources))
 				require.NoError(t, err)
-			}
-
-			if tc.admitFunc != nil {
-				handler := &testPodAdmitHandler{admitFunc: tc.admitFunc}
-				allocationManager.AddPodAdmitHandlers(lifecycle.PodAdmitHandlers{handler})
 			}
 
 			ok, reason, message := allocationManager.AddPod(tc.currentActivePods, tc.podToAdd)
@@ -1983,7 +1983,12 @@ func TestAllocationManagerAddPod(t *testing.T) {
 		featuregatetesting.SetFeatureGateEmulationVersionDuringTest(t, utilfeature.DefaultFeatureGate, version.MustParse("1.34"))
 		t.Run(tc.name, func(t *testing.T) {
 			featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.InPlacePodVerticalScaling, tc.ipprFeatureGate)
-			allocationManager := makeAllocationManager(t, &containertest.FakeRuntime{}, []*v1.Pod{}, nil)
+
+			var extraHandlers []lifecycle.PodAdmitHandler
+			if tc.admitFunc != nil {
+				extraHandlers = append(extraHandlers, &testPodAdmitHandler{admitFunc: tc.admitFunc})
+			}
+			allocationManager := makeAllocationManager(t, &containertest.FakeRuntime{}, []*v1.Pod{}, nil, extraHandlers...)
 
 			podForAllocation := func(uid types.UID, resources v1.ResourceList) *v1.Pod {
 				return &v1.Pod{
@@ -2000,11 +2005,6 @@ func TestAllocationManagerAddPod(t *testing.T) {
 			for podUID, resources := range tc.initialAllocatedResourcesState {
 				err := allocationManager.SetAllocatedResources(podForAllocation(podUID, resources))
 				require.NoError(t, err)
-			}
-
-			if tc.admitFunc != nil {
-				handler := &testPodAdmitHandler{admitFunc: tc.admitFunc}
-				allocationManager.AddPodAdmitHandlers(lifecycle.PodAdmitHandlers{handler})
 			}
 
 			ok, reason, message := allocationManager.AddPod(tc.currentActivePods, tc.podToAdd)
@@ -2414,7 +2414,7 @@ func TestRecordPodDeferredAcceptedResizes(t *testing.T) {
 	}
 }
 
-func makeAllocationManager(t *testing.T, runtime *containertest.FakeRuntime, allocatedPods []*v1.Pod, nodeConfig *cm.NodeConfig) Manager {
+func makeAllocationManager(t *testing.T, runtime *containertest.FakeRuntime, allocatedPods []*v1.Pod, nodeConfig *cm.NodeConfig, extraHandlers ...lifecycle.PodAdmitHandler) Manager {
 	t.Helper()
 	logger, _ := ktesting.NewTestContext(t)
 	statusManager := status.NewManager(&fake.Clientset{}, kubepod.NewBasicPodManager(), &statustest.FakePodDeletionSafetyProvider{}, kubeletutil.NewPodStartupLatencyTracker())
@@ -2424,6 +2424,9 @@ func makeAllocationManager(t *testing.T, runtime *containertest.FakeRuntime, all
 	} else {
 		containerManager = cm.NewFakeContainerManagerWithNodeConfig(*nodeConfig)
 	}
+
+	var handlers []lifecycle.PodAdmitHandler
+
 	allocationManager := NewInMemoryManager(
 		statusManager,
 		func(pod *v1.Pod) {
@@ -2444,8 +2447,8 @@ func makeAllocationManager(t *testing.T, runtime *containertest.FakeRuntime, all
 		},
 		config.NewSourcesReady(func(_ sets.Set[string]) bool { return true }),
 		record.NewFakeRecorder(20),
+		func() lifecycle.PodAdmitHandlers { return handlers },
 	)
-	allocationManager.SetContainerRuntime(runtime)
 
 	getNode := func(context.Context, bool) (*v1.Node, error) {
 		return &v1.Node{
@@ -2465,7 +2468,10 @@ func makeAllocationManager(t *testing.T, runtime *containertest.FakeRuntime, all
 
 	predicateHandler := lifecycle.NewPredicateAdmitHandler(getNode, lifecycle.NewAdmissionFailureHandlerStub(), containerManager.UpdatePluginResources)
 	resizeHandler := NewPodResizesAdmitHandler(containerManager, runtime, allocationManager, logger)
-	allocationManager.AddPodAdmitHandlers(lifecycle.PodAdmitHandlers{resizeHandler, predicateHandler})
+
+	handlers = append(handlers, resizeHandler, predicateHandler)
+	handlers = append(handlers, extraHandlers...)
+
 	return allocationManager
 }
 

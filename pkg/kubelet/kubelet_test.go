@@ -340,6 +340,8 @@ func newTestKubeletWithImageList(
 		Namespace: "",
 	}
 
+	var admitHandlers []lifecycle.PodAdmitHandler
+
 	kubelet.allocationManager = allocation.NewInMemoryManager(
 		kubelet.statusManager,
 		func(pod *v1.Pod) { kubelet.HandlePodSyncs(tCtx, []*v1.Pod{pod}) },
@@ -347,8 +349,9 @@ func newTestKubeletWithImageList(
 		kubelet.podManager.GetPodByUID,
 		config.NewSourcesReady(func(_ sets.Set[string]) bool { return enableResizing }),
 		kubelet.recorder,
+		func() lifecycle.PodAdmitHandlers { return admitHandlers },
 	)
-	kubelet.allocationManager.SetContainerRuntime(fakeRuntime)
+
 	volumeStatsAggPeriod := time.Second * 10
 	kubelet.resourceAnalyzer = serverstats.NewResourceAnalyzer(tCtx, kubelet, volumeStatsAggPeriod, kubelet.recorder)
 
@@ -429,7 +432,7 @@ func newTestKubeletWithImageList(
 	handlers = append(handlers, lifecycle.NewPredicateAdmitHandler(kubelet.GetCachedNode, lifecycle.NewAdmissionFailureHandlerStub(), kubelet.containerManager.UpdatePluginResources))
 
 	if !excludeAdmitHandlers {
-		kubelet.allocationManager.AddPodAdmitHandlers(handlers)
+		admitHandlers = handlers
 	}
 
 	allPlugins := []volume.VolumePlugin{}
@@ -1264,8 +1267,18 @@ func TestHandlePluginResources(t *testing.T) {
 		return nil
 	}
 
-	// add updatePluginResourcesFunc to admission handler, to test it's behavior.
-	kl.allocationManager.AddPodAdmitHandlers(lifecycle.PodAdmitHandlers{lifecycle.NewPredicateAdmitHandler(kl.GetCachedNode, lifecycle.NewAdmissionFailureHandlerStub(), updatePluginResourcesFunc)})
+	// Re-initialize the allocation manager with the mock handler.
+	kl.allocationManager = allocation.NewInMemoryManager(
+		kl.statusManager,
+		func(pod *v1.Pod) { kl.HandlePodSyncs(tCtx, []*v1.Pod{pod}) },
+		kl.GetActivePods,
+		kl.podManager.GetPodByUID,
+		config.NewSourcesReady(func(_ sets.Set[string]) bool { return false }),
+		kl.recorder,
+		func() lifecycle.PodAdmitHandlers {
+			return lifecycle.PodAdmitHandlers{lifecycle.NewPredicateAdmitHandler(kl.GetCachedNode, lifecycle.NewAdmissionFailureHandlerStub(), updatePluginResourcesFunc)}
+		},
+	)
 
 	recorder := record.NewFakeRecorder(20)
 	nodeRef := &v1.ObjectReference{
@@ -2772,7 +2785,18 @@ func TestHandlePodAdditionsInvokesPodAdmitHandlers(t *testing.T) {
 	podToAdmit := pods[1]
 	podsToReject := []*v1.Pod{podToReject}
 
-	kl.allocationManager.AddPodAdmitHandlers(lifecycle.PodAdmitHandlers{&testPodAdmitHandler{podsToReject: podsToReject}})
+	// Re-initialize the allocation manager with the mock handler.
+	kl.allocationManager = allocation.NewInMemoryManager(
+		kl.statusManager,
+		func(pod *v1.Pod) { kl.HandlePodSyncs(tCtx, []*v1.Pod{pod}) },
+		kl.GetActivePods,
+		kl.podManager.GetPodByUID,
+		config.NewSourcesReady(func(_ sets.Set[string]) bool { return false }),
+		kl.recorder,
+		func() lifecycle.PodAdmitHandlers {
+			return lifecycle.PodAdmitHandlers{&testPodAdmitHandler{podsToReject: podsToReject}}
+		},
+	)
 
 	kl.HandlePodAdditions(tCtx, pods)
 
@@ -3665,7 +3689,6 @@ func TestSyncPodSpans(t *testing.T) {
 		kubelet.podStartupLatencyTracker,
 	)
 	assert.NoError(t, err)
-	kubelet.allocationManager.SetContainerRuntime(kubelet.containerRuntime)
 
 	pod := podWithUIDNameNsSpec("12345678", "foo", "new", v1.PodSpec{
 		Containers: []v1.Container{
@@ -4903,7 +4926,19 @@ func TestHandlePodReconcile_RetryPendingResizes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// For the sake of this test, just reject all resize requests.
 			handler := &testPodAdmitHandler{podsToReject: []*v1.Pod{pendingResizeAllocated}}
-			kubelet.allocationManager.AddPodAdmitHandlers(lifecycle.PodAdmitHandlers{handler})
+
+			// Re-initialize the manager inline with the handler.
+			kubelet.allocationManager = allocation.NewInMemoryManager(
+				kubelet.statusManager,
+				func(pod *v1.Pod) { kubelet.HandlePodSyncs(tCtx, []*v1.Pod{pod}) },
+				kubelet.GetActivePods,
+				kubelet.podManager.GetPodByUID,
+				config.NewSourcesReady(func(_ sets.Set[string]) bool { return true }),
+				kubelet.recorder,
+				func() lifecycle.PodAdmitHandlers {
+					return lifecycle.PodAdmitHandlers{handler}
+				},
+			)
 
 			require.NoError(t, kubelet.allocationManager.SetAllocatedResources(pendingResizeAllocated))
 			require.NoError(t, kubelet.allocationManager.SetAllocatedResources(tc.oldPod))

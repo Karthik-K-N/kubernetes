@@ -701,6 +701,10 @@ func NewMainKubelet(ctx context.Context,
 		klet.podsServer = pods.NewPodsServer(broadcaster, klet.podManager, klet.statusManager)
 		klet.statusManager.AddPodUpdateNotifier(klet.podsServer)
 	}
+
+	// Declare the admint handlers slice so the closure can capture it by reference in allocation manager.
+	var handlers []lifecycle.PodAdmitHandler
+
 	klet.allocationManager = allocation.NewManager(
 		klet.getRootDir(),
 		klet.statusManager,
@@ -709,6 +713,7 @@ func NewMainKubelet(ctx context.Context,
 		klet.podManager.GetPodByUID,
 		klet.sourcesReady,
 		kubeDeps.Recorder,
+		func() lifecycle.PodAdmitHandlers { return handlers },
 	)
 
 	klet.resourceAnalyzer = serverstats.NewResourceAnalyzer(ctx, klet, kubeCfg.VolumeStatsAggPeriod.Duration, kubeDeps.Recorder)
@@ -819,8 +824,8 @@ func NewMainKubelet(ctx context.Context,
 	klet.containerRuntime = runtime
 	klet.streamingRuntime = runtime
 	klet.runner = runtime
-	klet.allocationManager.SetContainerRuntime(runtime)
-	resizeAdmitHandler := allocation.NewPodResizesAdmitHandler(klet.containerManager, runtime, klet.allocationManager, logger)
+
+	handlers = append(handlers, allocation.NewPodResizesAdmitHandler(klet.containerManager, runtime, klet.allocationManager, logger))
 
 	runtimeCache, err := kubecontainer.NewRuntimeCache(klet.containerRuntime, runtimeCacheRefreshPeriod)
 	if err != nil {
@@ -1076,7 +1081,7 @@ func NewMainKubelet(ctx context.Context,
 		killPodNow(ctx, klet.podWorkers, kubeDeps.Recorder), klet.imageManager, klet.containerGC, kubeDeps.Recorder, nodeRef, klet.clock, kubeCfg.LocalStorageCapacityIsolation)
 
 	klet.evictionManager = evictionManager
-	handlers := []lifecycle.PodAdmitHandler{}
+
 	handlers = append(handlers, evictionAdmitHandler)
 
 	if utilfeature.DefaultFeatureGate.Enabled(features.NodeDeclaredFeatures) {
@@ -1163,8 +1168,6 @@ func NewMainKubelet(ctx context.Context,
 	})
 	klet.shutdownManager = shutdownManager
 	handlers = append(handlers, shutdownManager)
-
-	klet.allocationManager.AddPodAdmitHandlers(append([]lifecycle.PodAdmitHandler{resizeAdmitHandler}, handlers...))
 
 	var usernsIDsPerPod *int64
 	if kubeCfg.UserNamespaces != nil {
