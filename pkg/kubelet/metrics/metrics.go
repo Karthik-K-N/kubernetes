@@ -205,6 +205,11 @@ const (
 
 	// Metric key for podsapi
 	PodWatchEventsDroppedKey = "pod_watch_events_dropped_total"
+
+	// Metric keys for in-place node resize operations
+	NodeResizeRequestsTotalKey          = "node_resize_requests_total"
+	NodeResizeReconciliationDurationKey = "node_resize_reconciliation_duration_seconds"
+	NodeResizeErrorsTotalKey            = "node_resize_errors_total"
 )
 
 type imageSizeBucket struct {
@@ -1303,6 +1308,40 @@ var (
 			StabilityLevel: metrics.ALPHA,
 		},
 	)
+
+	// NodeResizeReconciliationDuration measures how long it takes to process a node capacity change.
+	NodeResizeReconciliationDuration = metrics.NewHistogramVec(
+		&metrics.HistogramOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           NodeResizeReconciliationDurationKey,
+			Help:           "Duration in seconds to reconcile a dynamic node capacity resize.",
+			Buckets:        metrics.DefBuckets,
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"direction", "resource"}, // e.g., direction="increase", resource="memory"
+	)
+
+	// NodeResizeRequestsTotal counts the number of detected capacity changes.
+	NodeResizeRequestsTotal = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           NodeResizeRequestsTotalKey,
+			Help:           "Number of node capacity resize events detected.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"direction", "resource"},
+	)
+
+	// NodeResizeErrorsTotal counts the number of failures during resize reconciliation.
+	NodeResizeErrorsTotal = metrics.NewCounterVec(
+		&metrics.CounterOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           NodeResizeErrorsTotalKey,
+			Help:           "Number of errors encountered during node capacity resize reconciliation.",
+			StabilityLevel: metrics.ALPHA,
+		},
+		[]string{"error_type"}, // e.g., error_type="cgroup_update", error_type="manager_sync"
+	)
 )
 
 var registerMetrics sync.Once
@@ -1430,6 +1469,12 @@ func Register() {
 			legacyregistry.MustRegister(ResourceManagerAllocationsTotal)
 			legacyregistry.MustRegister(ResourceManagerAllocationErrorsTotal)
 			legacyregistry.MustRegister(ResourceManagerContainerAssignments)
+		}
+
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlaceNodeResourceResize) {
+			legacyregistry.MustRegister(NodeResizeReconciliationDuration)
+			legacyregistry.MustRegister(NodeResizeRequestsTotal)
+			legacyregistry.MustRegister(NodeResizeErrorsTotal)
 		}
 
 		legacyregistry.MustRegister(PodWatchEventsDroppedTotal)

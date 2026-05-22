@@ -1461,3 +1461,60 @@ func isProbeTerminationGracePeriodSecondsSet(ctx context.Context, pod *v1.Pod, c
 	}
 	return false
 }
+
+// ResizeContainersOnNodeCapacityChange recalculates and applies new Swap limits
+// for all running containers when the underlying node capacity changes.
+func (m *kubeGenericRuntimeManager) ResizeContainersOnNodeCapacityChange(ctx context.Context, activePods []*v1.Pod, currentCapacity v1.ResourceList, totalPodsSwapAvailable int64) error {
+	logger := klog.FromContext(ctx)
+
+	// SHORT-CIRCUIT: If the node has no swap available, there are no limits
+	// to recalculate. We can safely exit immediately.
+	if totalPodsSwapAvailable <= 0 {
+		logger.V(4).Info("No swap available on node, skipping container swap limit recalculation during resize")
+		return nil
+	}
+
+	logger.Info("Recalculating container swap limits due to node capacity resize")
+
+	var errs []error
+
+	for _, v1Pod := range activePods {
+		// Create a minimal kubecontainer.Pod for GetPodStatus
+		runtimePod := &kubecontainer.Pod{
+			ID:        v1Pod.UID,
+			Name:      v1Pod.Name,
+			Namespace: v1Pod.Namespace,
+		}
+		
+		// Fetch the runtime pod status to find active containers
+		podStatus, err := m.GetPodStatus(ctx, runtimePod)
+		if err != nil {
+			logger.Error(err, "Failed to get pod status during capacity resize", "podUID", v1Pod.UID)
+			continue
+		}
+
+		for i := range v1Pod.Spec.Containers {
+			v1Container := &v1Pod.Spec.Containers[i]
+			containerStatus := podStatus.FindContainerStatusByName(v1Container.Name)
+
+			// We only care about updating limits for actively running containers
+			if containerStatus == nil || containerStatus.State != kubecontainer.ContainerStateRunning {
+				continue
+			}
+
+			// Call the existing safe update method. 
+			// This automatically recalculates the exact proportional swap limit based on the new 
+			// Node Allocatable capacity and updates the CRI safely!
+			logger.V(4).Info("Updating resources for container during node resize", "containerName", v1Container.Name, "podUID", v1Pod.UID)
+			err := m.updateContainerResources(ctx, v1Pod, v1Container, containerStatus.ID)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("failed to update resources for container %s in pod %s: %w", v1Container.Name, v1Pod.Name, err))
+			}
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("encountered errors resizing container swap limits: %v", errs)
+	}
+	return nil
+}

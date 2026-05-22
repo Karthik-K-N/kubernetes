@@ -162,6 +162,10 @@ type ContainerManager interface {
 	// ContainerHasExclusiveCPUs returns true if the provided container in the pod has exclusive cpu
 	ContainerHasExclusiveCPUs(pod *v1.Pod, container *v1.Container) bool
 
+	// NodeCapacityUpdates returns a channel that emits a signal when the underlying
+	// node capacity (CPU/Memory) changes, prompting an immediate NodeStatus update.
+	NodeCapacityUpdates() <-chan struct{}
+
 	// Implements the PodResources Provider API
 	podresources.CPUsProvider
 	podresources.DevicesProvider
@@ -178,7 +182,7 @@ type NodeConfig struct {
 	RuntimeCgroupsName    string
 	SystemCgroupsName     string
 	KubeletCgroupsName    string
-	KubeletOOMScoreAdj    int32
+	KubeletOOMScoreAdj    int32	
 	ContainerRuntime      string
 	CgroupsPerQOS         bool
 	CgroupRoot            string

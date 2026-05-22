@@ -19,6 +19,7 @@ package memorymanager
 import (
 	"context"
 
+	cadvisorapi "github.com/google/cadvisor/info/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/klog/v2"
@@ -98,6 +99,12 @@ func (m *fakeManager) GetMemory(podUID, containerName string) []state.Block {
 	logger := klog.LoggerWithValues(klog.TODO(), "podUID", podUID, "containerName", containerName)
 	logger.Info("Get Memory")
 	return []state.Block{}
+}
+
+// SyncCapacity updates the policy's internal state based on a dynamic node capacity resize.
+func (m *fakeManager) SyncCapacity(logger klog.Logger, machineInfo *cadvisorapi.MachineInfo, s state.State) error {
+	logger.Info("SyncCapacity")
+	return nil
 }
 
 // NewFakeManager creates empty/fake memory manager

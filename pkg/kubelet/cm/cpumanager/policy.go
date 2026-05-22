@@ -21,6 +21,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/state"
+	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
 	"k8s.io/utils/cpuset"
 )
@@ -45,4 +46,6 @@ type Policy interface {
 	AllocatePod(logger logr.Logger, s state.State, pod *v1.Pod) error
 	// GetAllocatableCPUs returns the total set of CPUs available for allocation.
 	GetAllocatableCPUs(m state.State) cpuset.CPUSet
+	// SyncCapacity updates the policy's internal state based on a dynamic node capacity resize.
+	SyncCapacity(logger logr.Logger, topo *topology.CPUTopology, s state.State) error
 }

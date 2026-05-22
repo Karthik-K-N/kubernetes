@@ -1865,6 +1865,52 @@ func (_c *MockContainerManager_Updates_Call) RunAndReturn(run func() <-chan reso
 	_c.Call.Return(run)
 	return _c
 }
+// NodeCapacityUpdates provides a mock function for the type MockContainerManager
+func (_mock *MockContainerManager) NodeCapacityUpdates() <-chan struct{} {
+	ret := _mock.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for NodeCapacityUpdates")
+	}
+
+	var r0 <-chan struct{}
+	if returnFunc, ok := ret.Get(0).(func() <-chan struct{}); ok {
+		r0 = returnFunc()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+	return r0
+}
+
+// MockContainerManager_NodeCapacityUpdates_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'NodeCapacityUpdates'
+type MockContainerManager_NodeCapacityUpdates_Call struct {
+	*mock.Call
+}
+
+// NodeCapacityUpdates is a helper method to define mock.On call
+func (_e *MockContainerManager_Expecter) NodeCapacityUpdates() *MockContainerManager_NodeCapacityUpdates_Call {
+	return &MockContainerManager_NodeCapacityUpdates_Call{Call: _e.mock.On("NodeCapacityUpdates")}
+}
+
+func (_c *MockContainerManager_NodeCapacityUpdates_Call) Run(run func()) *MockContainerManager_NodeCapacityUpdates_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockContainerManager_NodeCapacityUpdates_Call) Return(ch <-chan struct{}) *MockContainerManager_NodeCapacityUpdates_Call {
+	_c.Call.Return(ch)
+	return _c
+}
+
+func (_c *MockContainerManager_NodeCapacityUpdates_Call) RunAndReturn(run func() <-chan struct{}) *MockContainerManager_NodeCapacityUpdates_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 
 // NewMockPodContainerManager creates a new instance of MockPodContainerManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.

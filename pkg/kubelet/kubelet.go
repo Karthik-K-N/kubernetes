@@ -1944,6 +1944,47 @@ func (kl *Kubelet) Run(ctx context.Context, updates <-chan kubetypes.PodUpdate) 
 		// To ensure kube-scheduler is aware of static pod resource usage faster,
 		// mirror pods are created as soon as the node registers.
 		go kl.fastStaticPodsRegistration(ctx)
+
+		// Listen for dynamic node capacity changes if the feature gate is enabled.
+		if utilfeature.DefaultFeatureGate.Enabled(features.InPlaceNodeResourceResize) {
+			go wait.Until(func() {
+				for range kl.containerManager.NodeCapacityUpdates() {
+					logger.Info("Received signal to update node status due to dynamic capacity resize")
+
+					// Refresh the Kubelet's internal MachineInfo cache with the latest hardware data.
+					// The node status sync relies on this cache to populate Node.Status.Capacity.
+					// If this cache is not updated, the status manager will aggressively clamp the
+					// newly calculated Node.Status.Allocatable boundaries down to the stale boot-time
+					// capacity, effectively hiding the hot-plugged resources from the control plane.
+					if info, err := kl.cadvisor.MachineInfo(); err == nil {
+						info.Timestamp = time.Time{} // Clear timestamp to match Kubelet init behavior
+						kl.setCachedMachineInfo(info)
+					}
+
+					currentCapacity := kl.containerManager.GetCapacity(kl.supportLocalStorageCapacityIsolation())
+
+					// 1. Synchronize Eviction Thresholds with the newly detected capacity
+					if err := kl.evictionManager.SynchronizeThresholds(currentCapacity); err != nil {
+						logger.Error(err, "Eviction manager failed to synchronize thresholds for new capacity")
+						metrics.NodeResizeErrorsTotal.WithLabelValues("eviction_threshold_sync").Inc()
+					}
+
+					// 2. Recalculate and apply container swap limits to the CRI
+					// (Passing 0 for totalPodsSwapAvailable as a safe default for now)
+					if err := kl.containerRuntime.ResizeContainersOnNodeCapacityChange(ctx, kl.GetActivePods(), currentCapacity, 0); err != nil {
+						logger.Error(err, "Failed to resize container swap limits on the runtime")
+						metrics.NodeResizeErrorsTotal.WithLabelValues("container_swap_resize").Inc()
+					}
+
+					// 3. Evict pods that are starved by the downscale
+					kl.evictStarvedPods(ctx, currentCapacity)
+
+					// 4. Immediately sync the node status to propagate the new capacity
+					// to the API server and scheduler.
+					kl.syncNodeStatus(ctx)
+				}
+			}, 0, wait.NeverStop)
+		}
 	}
 	go wait.UntilWithContext(ctx, kl.updateRuntimeUp, 5*time.Second)
 
@@ -3584,4 +3625,39 @@ func (kl *Kubelet) OnPodSandboxReady(ctx context.Context, pod *v1.Pod) error {
 	}()
 
 	return nil
+}
+
+// evictStarvedPods evaluates running pods against the newly downscaled hardware capacity.
+func (kl *Kubelet) evictStarvedPods(ctx context.Context, capacity v1.ResourceList) {
+	allocatableCPU := capacity.Cpu().MilliValue()
+	allocatableMem := capacity.Memory().Value()
+
+	for _, pod := range kl.GetActivePods() {
+		var reqCPU int64 = 0
+		var reqMem int64 = 0
+
+		// Sum up requests across all containers in the pod
+		for _, container := range pod.Spec.Containers {
+			reqCPU += container.Resources.Requests.Cpu().MilliValue()
+			reqMem += container.Resources.Requests.Memory().Value()
+		}
+
+		// The Contract Violation Check
+		if reqCPU > allocatableCPU || reqMem > allocatableMem {
+			klog.InfoS("Evicting pod due to hardware capacity starvation", "pod", klog.KObj(pod), "reason", "NodeCapacityExceeded")
+
+			// Instruct the Kubelet PodWorker to gracefully terminate it
+			kl.podWorkers.UpdatePod(ctx, UpdatePodOptions{
+				Pod:        pod,
+				UpdateType: kubetypes.SyncPodKill,
+				KillPodOptions: &KillPodOptions{
+					PodStatusFunc: func(status *v1.PodStatus) {
+						status.Phase = v1.PodFailed
+						status.Reason = "NodeCapacityExceeded"
+						status.Message = "Node hardware was hot-unplugged and can no longer fulfill the pod's strict resource requests."
+					},
+				},
+			})
+		}
+	}
 }

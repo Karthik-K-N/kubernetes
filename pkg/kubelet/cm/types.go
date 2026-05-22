@@ -17,6 +17,8 @@ limitations under the License.
 package cm
 
 import (
+	cadvisorapi "github.com/google/cadvisor/info/v1"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -138,4 +140,11 @@ type PodContainerManager interface {
 
 	// Set resource config values for the specified resource type on the pod cgroup
 	SetPodCgroupConfig(logger klog.Logger, pod *v1.Pod, resourceConfig *ResourceConfig) error
+}
+
+// ResourceResizer defines the interface for resource managers that can adapt to
+// underlying node capacity changes on the fly.
+type ResourceResizer interface {
+	// SyncCapacity is called when the underlying hardware capacity changes.
+	SyncCapacity(machineInfo *cadvisorapi.MachineInfo) error
 }

@@ -18,6 +18,7 @@ package kubelet
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net"
@@ -584,7 +585,31 @@ func (kl *Kubelet) updateNode(ctx context.Context, originalNode *v1.Node) (*v1.N
 
 	kl.setNodeStatus(ctx, node)
 
-	changed := podCIDRChanged || nodeStatusHasChanged(&originalNode.Status, &node.Status) || areRequiredLabelsNotPresent
+	annotationChanged := false
+	if utilfeature.DefaultFeatureGate.Enabled(features.InPlaceNodeResourceResize) {
+		if node.Annotations == nil {
+			node.Annotations = make(map[string]string)
+		}
+
+		const initialCapacityAnnotation = "resize.node.kubernetes.io/initial-capacity"
+
+		// Only set the annotation if it does not already exist. This ensures it acts
+		// as a static baseline from the moment the node starts up with the feature enabled.
+		if _, exists := node.Annotations[initialCapacityAnnotation]; !exists {
+			if len(node.Status.Capacity) > 0 {
+				capacityJSON, err := json.Marshal(node.Status.Capacity)
+				if err != nil {
+					logger.Error(err, "Failed to marshal node capacity for initial-capacity annotation")
+				} else {
+					node.Annotations[initialCapacityAnnotation] = string(capacityJSON)
+					annotationChanged = true
+					logger.V(2).Info("Successfully set initial capacity annotation for node", "annotation", initialCapacityAnnotation)
+				}
+			}
+		}
+	}
+
+	changed := podCIDRChanged || nodeStatusHasChanged(&originalNode.Status, &node.Status) || areRequiredLabelsNotPresent || annotationChanged
 	return node, changed
 }
 

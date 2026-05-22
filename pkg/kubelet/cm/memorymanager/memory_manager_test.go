@@ -123,6 +123,10 @@ func (p *mockPolicy) GetAllocatableMemory(state.State) []state.Block {
 	return []state.Block{}
 }
 
+func (p *mockPolicy) SyncCapacity(klog.Logger, *cadvisorapi.MachineInfo, state.State) error {
+	return p.err
+}
+
 type mockRuntimeService struct {
 	err error
 }

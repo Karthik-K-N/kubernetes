@@ -1836,6 +1836,54 @@ func (_c *MockRuntime_Version_Call) RunAndReturn(run func(ctx context.Context) (
 	_c.Call.Return(run)
 	return _c
 }
+// ResizeContainersOnNodeCapacityChange provides a mock function for the type MockRuntime
+func (_m *MockRuntime) ResizeContainersOnNodeCapacityChange(ctx context.Context, activePods []*v10.Pod, currentCapacity v10.ResourceList, totalPodsSwapAvailable int64) error {
+	ret := _m.Called(ctx, activePods, currentCapacity, totalPodsSwapAvailable)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ResizeContainersOnNodeCapacityChange")
+	}
+
+	var r0 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, []*v10.Pod, v10.ResourceList, int64) error); ok {
+		r0 = returnFunc(ctx, activePods, currentCapacity, totalPodsSwapAvailable)
+	} else {
+		r0 = ret.Error(0)
+	}
+	return r0
+}
+
+// MockRuntime_ResizeContainersOnNodeCapacityChange_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResizeContainersOnNodeCapacityChange'
+type MockRuntime_ResizeContainersOnNodeCapacityChange_Call struct {
+	*mock.Call
+}
+
+// ResizeContainersOnNodeCapacityChange is a helper method to define mock.On call
+//   - ctx context.Context
+//   - activePods []*v10.Pod
+//   - currentCapacity v10.ResourceList
+//   - totalPodsSwapAvailable int64
+func (_e *MockRuntime_Expecter) ResizeContainersOnNodeCapacityChange(ctx interface{}, activePods interface{}, currentCapacity interface{}, totalPodsSwapAvailable interface{}) *MockRuntime_ResizeContainersOnNodeCapacityChange_Call {
+	return &MockRuntime_ResizeContainersOnNodeCapacityChange_Call{Call: _e.mock.On("ResizeContainersOnNodeCapacityChange", ctx, activePods, currentCapacity, totalPodsSwapAvailable)}
+}
+
+func (_c *MockRuntime_ResizeContainersOnNodeCapacityChange_Call) Run(run func(ctx context.Context, activePods []*v10.Pod, currentCapacity v10.ResourceList, totalPodsSwapAvailable int64)) *MockRuntime_ResizeContainersOnNodeCapacityChange_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*v10.Pod), args[2].(v10.ResourceList), args[3].(int64))
+	})
+	return _c
+}
+
+func (_c *MockRuntime_ResizeContainersOnNodeCapacityChange_Call) Return(_a0 error) *MockRuntime_ResizeContainersOnNodeCapacityChange_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockRuntime_ResizeContainersOnNodeCapacityChange_Call) RunAndReturn(run func(context.Context, []*v10.Pod, v10.ResourceList, int64) error) *MockRuntime_ResizeContainersOnNodeCapacityChange_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 
 // NewMockRuntimeCache creates a new instance of MockRuntimeCache. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.

@@ -85,3 +85,7 @@ func (p *bestEffortPolicy) AllocatePod(logger logr.Logger, s state.State, pod *v
 	// Pod-level resources are not supported on Windows.
 	return nil
 }
+
+func (p *bestEffortPolicy) SyncCapacity(logger logr.Logger, machineInfo *cadvisorapi.MachineInfo, s state.State) error {
+	return p.static.SyncCapacity(logger, machineInfo, s)
+}

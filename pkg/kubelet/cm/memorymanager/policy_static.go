@@ -1492,3 +1492,40 @@ func isAffinityViolatingNUMAAllocations(machineState state.NUMANodeMap, mask bit
 	}
 	return false
 }
+
+func (p *staticPolicy) SyncCapacity(logger klog.Logger, machineInfo *cadvisorapi.MachineInfo, s state.State) error {
+	p.machineInfo = machineInfo
+
+	// 1. Generate the baseline machine state based on the new topology and existing system reservations.
+	// getDefaultMachineState() is an existing helper in policy_static.go that subtracts p.systemReserved
+	// from the total memory reported by p.machineInfo.
+	newMachineState := p.getDefaultMachineState()
+
+	// 2. Subtract all currently active exclusive memory assignments
+	assignments := s.GetMemoryAssignments()
+	for _, containers := range assignments {
+		for _, blocks := range containers {
+			for _, block := range blocks {
+				for _, numaID := range block.NUMAAffinity {
+					nodeState, ok := newMachineState[numaID]
+					if !ok {
+						// This shouldn't happen if the manager's SyncCapacity cleaned up vanished NUMA nodes,
+						// but we log and ignore just in case.
+						logger.Error(nil, "Active assignment references missing NUMA node", "numaID", numaID)
+						continue
+					}
+
+					// Subtract the allocated block from the free memory of this NUMA node
+					nodeState.MemoryMap[block.Type].Free -= block.Size
+					nodeState.NumberOfAssignments++
+				}
+			}
+		}
+	}
+
+	// 3. Persist the newly calculated state
+	s.SetMachineState(newMachineState)
+
+	logger.V(2).Info("Static policy successfully synced new Memory capacity")
+	return nil
+}

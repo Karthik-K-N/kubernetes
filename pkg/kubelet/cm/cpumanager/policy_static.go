@@ -1113,3 +1113,26 @@ func updateAllocationPerNUMAMetric(logger logr.Logger, topo *topology.CPUTopolog
 		metrics.CPUManagerAllocationPerNUMA.WithLabelValues(strconv.Itoa(numaNode)).Set(float64(count))
 	}
 }
+
+func (p *staticPolicy) SyncCapacity(logger logr.Logger, topo *topology.CPUTopology, s state.State) error {
+	p.topology = topo
+
+	// 1. Find all exclusively assigned CPUs from the current state
+	assignments := s.GetCPUAssignments()
+	assignedCPUs := cpuset.New()
+	for _, containers := range assignments {
+		for _, cset := range containers {
+			assignedCPUs = assignedCPUs.Union(cset)
+		}
+	}
+
+	// 2. The new default pool is the set of all available CPUs minus the exclusively assigned ones
+	allCPUs := topo.CPUDetails.CPUs()
+	defaultCPUSet := allCPUs.Difference(assignedCPUs)
+
+	// 3. Update the state with the newly calculated shared pool
+	s.SetDefaultCPUSet(defaultCPUSet)
+
+	logger.V(2).Info("Static policy successfully synced new CPU capacity", "newDefaultCPUSet", defaultCPUSet.String())
+	return nil
+}

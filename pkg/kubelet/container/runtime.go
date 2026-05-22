@@ -151,6 +151,9 @@ type Runtime interface {
 	IsPodResizeInProgress(allocatedPod *v1.Pod, podStatus *PodStatus) bool
 	// UpdateActuatedPodLevelResources updates pod-level resources in actuatedState
 	UpdateActuatedPodLevelResources(actuatedPod *v1.Pod) error
+	// ResizeContainersOnNodeCapacityChange recalculates and applies new Swap limits
+	// for all running containers when the underlying node capacity changes.
+	ResizeContainersOnNodeCapacityChange(ctx context.Context, activePods []*v1.Pod, currentCapacity v1.ResourceList, totalPodsSwapAvailable int64) error
 }
 
 var (

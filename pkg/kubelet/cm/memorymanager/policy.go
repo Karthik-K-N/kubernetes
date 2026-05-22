@@ -17,6 +17,7 @@ limitations under the License.
 package memorymanager
 
 import (
+	cadvisorapi "github.com/google/cadvisor/info/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/kubelet/cm/memorymanager/state"
@@ -46,4 +47,6 @@ type Policy interface {
 	AllocatePod(logger klog.Logger, s state.State, pod *v1.Pod) error
 	// GetAllocatableMemory returns the amount of allocatable memory for each NUMA node
 	GetAllocatableMemory(s state.State) []state.Block
+	// SyncCapacity updates the policy's internal state based on a dynamic node capacity resize.
+	SyncCapacity(logger klog.Logger, machineInfo *cadvisorapi.MachineInfo, s state.State) error
 }

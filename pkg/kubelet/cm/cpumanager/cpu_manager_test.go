@@ -165,6 +165,10 @@ func (p *mockPolicy) GetAllocatableCPUs(m state.State) cpuset.CPUSet {
 	return cpuset.New()
 }
 
+func (p *mockPolicy) SyncCapacity(_ logr.Logger, topo *topology.CPUTopology, s state.State) error {
+	return p.err
+}
+
 type mockRuntimeService struct {
 	err error
 }

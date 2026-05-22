@@ -464,6 +464,13 @@ const (
 	// Allow in-place pod resize of running non-sidecar init containers.
 	InPlacePodVerticalScalingInitContainers featuregate.Feature = "InPlacePodVerticalScalingInitContainers"
 
+	// owner: @karthik-k-n
+	// kep: https://kep.k8s.io/3953
+	//
+	// Enables dynamic node resource resizing (CPU, Memory, Swap, HugePages) without requiring
+	// node reboot or kubelet restart.
+	InPlaceNodeResourceResize featuregate.Feature = "InPlaceNodeResourceResize"
+
 	// owner: @mimowo
 	// kep: https://kep.k8s.io/3850
 	//
@@ -1519,6 +1526,10 @@ var defaultVersionedKubernetesFeatureGates = map[featuregate.Feature]featuregate
 		{Version: version.MustParse("1.36"), Default: true, PreRelease: featuregate.Beta},
 	},
 
+	InPlaceNodeResourceResize: {
+		{Version: version.MustParse("1.35"), Default: false, PreRelease: featuregate.Alpha},
+	},
+
 	JobBackoffLimitPerIndex: {
 		{Version: version.MustParse("1.28"), Default: false, PreRelease: featuregate.Alpha},
 		{Version: version.MustParse("1.29"), Default: true, PreRelease: featuregate.Beta},
@@ -2453,6 +2464,8 @@ var defaultKubernetesFeatureGateDependencies = map[featuregate.Feature][]feature
 	InPlacePodVerticalScalingExclusiveMemory: {InPlacePodVerticalScaling},
 
 	InPlacePodVerticalScalingInitContainers: {InPlacePodVerticalScaling, NodeDeclaredFeatures},
+
+	InPlaceNodeResourceResize: {},
 
 	JobBackoffLimitPerIndex: {},
 

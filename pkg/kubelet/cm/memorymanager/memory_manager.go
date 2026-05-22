@@ -95,6 +95,9 @@ type Manager interface {
 
 	// GetMemory returns the memory allocated by a container from NUMA nodes
 	GetMemory(podUID, containerName string) []state.Block
+
+	// SyncCapacity updates the policy's internal state based on a dynamic node capacity resize.
+	SyncCapacity(logger klog.Logger, machineInfo *cadvisorapi.MachineInfo, s state.State) error
 }
 
 type manager struct {
@@ -493,4 +496,58 @@ func (m *manager) GetAllocatableMemory() []state.Block {
 // GetMemory returns the memory allocated by a container from NUMA nodes
 func (m *manager) GetMemory(podUID, containerName string) []state.Block {
 	return m.state.GetMemoryBlocks(podUID, containerName)
+}
+
+// SyncCapacity implements the ResourceResizer interface for the Memory Manager.
+// It rebuilds the NUMA topology and audits existing memory assignments against the new hardware state.
+func (m *manager) SyncCapacity(logger klog.Logger, machineInfo *cadvisorapi.MachineInfo, s state.State) error {
+	m.Lock()
+	defer m.Unlock()
+
+	// 1. Rebuild the NUMA topology mapping
+	newTopology := machineInfo.Topology
+	availableNUMANodes := make(map[int]bool)
+	for _, node := range newTopology {
+		availableNUMANodes[node.Id] = true
+	}
+
+	// 2. Audit existing memory assignments
+	assignments := s.GetMemoryAssignments()
+	var orphanedPods []string
+
+	for podUID, containers := range assignments {
+		for containerName, blocks := range containers {
+			for _, block := range blocks {
+				for _, numaID := range block.NUMAAffinity {
+					// If the container is pinned to a NUMA node that no longer exists
+					if !availableNUMANodes[numaID] {
+						logger.Error(nil, "Hardware vanished for exclusive memory assignment",
+							"podUID", podUID,
+							"containerName", containerName,
+							"numaNode", numaID)
+
+						orphanedPods = append(orphanedPods, podUID)
+
+						// Purge the corrupted assignment
+						m.policyRemoveContainerByRef(logger, podUID, containerName)
+						break // Break out of the NUMA affinity loop for this block
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Reconcile the policy
+	if err := m.policy.SyncCapacity(logger, machineInfo, s); err != nil {
+		return fmt.Errorf("Memory policy failed to sync capacity: %w", err)
+	}
+
+	// 4. Update the manager's allocatable cache based on the new policy state
+	m.allocatableMemory = m.policy.GetAllocatableMemory(s)
+
+	if len(orphanedPods) > 0 {
+		return fmt.Errorf("critical NUMA nodes vanished for pods: %v", orphanedPods)
+	}
+
+	return nil
 }

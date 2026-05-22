@@ -208,6 +208,10 @@ func (cm *containerManagerStub) ContainerHasExclusiveCPUs(pod *v1.Pod, container
 	return false
 }
 
+func (cm *containerManagerStub) NodeCapacityUpdates() <-chan struct{} {
+	return nil
+}
+
 func NewStubContainerManager() ContainerManager {
 	return &containerManagerStub{shouldResetExtendedResourceCapacity: false}
 }

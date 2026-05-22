@@ -70,6 +70,10 @@ type Manager interface {
 
 	// IsUnderPIDPressure returns true if the node is under PID pressure.
 	IsUnderPIDPressure() bool
+
+	// SynchronizeThresholds dynamically recalculates absolute eviction thresholds
+	// from percentage configs and restarts the kernel cgroup notification loops.
+	SynchronizeThresholds(currentCapacity v1.ResourceList) error
 }
 
 // DiskInfoProvider is responsible for informing the manager how disk is configured.

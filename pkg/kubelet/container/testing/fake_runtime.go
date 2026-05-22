@@ -598,3 +598,10 @@ func (f *FakeRuntime) IsPodResizeInProgress(allocatedPod *v1.Pod, podStatus *kub
 func (f *FakeRuntime) UpdateActuatedPodLevelResources(allocatedPod *v1.Pod) error {
 	return nil
 }
+
+func (f *FakeRuntime) ResizeContainersOnNodeCapacityChange(ctx context.Context, activePods []*v1.Pod, currentCapacity v1.ResourceList, totalPodsSwapAvailable int64) error {
+	f.Lock()
+	defer f.Unlock()
+	f.CalledFunctions = append(f.CalledFunctions, "ResizeContainersOnNodeCapacityChange")
+	return f.Err
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/state"
+	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager"
 	"k8s.io/utils/cpuset"
 )
@@ -78,4 +79,9 @@ func (p *nonePolicy) AllocatePod(_ logr.Logger, s state.State, pod *v1.Pod) erro
 // Hence, we return empty set here: no cpus are assignable according to above definition with this policy.
 func (p *nonePolicy) GetAllocatableCPUs(m state.State) cpuset.CPUSet {
 	return cpuset.New()
+}
+
+func (p *nonePolicy) SyncCapacity(logger logr.Logger, topo *topology.CPUTopology, s state.State) error {
+	// The none policy doesn't manage exclusive CPU sets, so no state reconciliation is needed.
+	return nil
 }

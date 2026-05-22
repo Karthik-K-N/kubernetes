@@ -590,3 +590,63 @@ func (m *manager) GetResourceIsolationLevel(pod *v1.Pod, container *v1.Container
 
 	return cmqos.ResourceIsolationContainer
 }
+
+// SyncCapacity implements the ResourceResizer interface. It rebuilds the CPU topology
+// and audits existing exclusive CPU assignments against the new hardware state.
+func (m *manager) SyncCapacity(machineInfo *cadvisorapi.MachineInfo) error {
+	logger := klog.TODO() // or pass down from caller if you prefer
+
+	m.Lock()
+	defer m.Unlock()
+
+	// 1. Rebuild the internal CPU topology
+	newTopology, err := topology.Discover(logger, machineInfo)
+	if err != nil {
+		return fmt.Errorf("failed to discover new CPU topology: %w", err)
+	}
+
+	// 2. Extract the new valid CPU IDs
+	availableCPUs := newTopology.CPUDetails.CPUs()
+
+	// 3. Audit existing assignments
+	assignments := m.state.GetCPUAssignments()
+	var orphanedPods []string
+
+	for podUID, containers := range assignments {
+		for containerName, cset := range containers {
+			// If the container's assigned CPUs are no longer a subset of the available CPUs,
+			// the hardware it was pinned to has been hot-unplugged.
+			if !cset.IsSubsetOf(availableCPUs) {
+				logger.Error(nil, "Hardware vanished for exclusive CPU assignment",
+					"podUID", podUID,
+					"containerName", containerName,
+					"assignedCPUs", cset.String(),
+					"availableCPUs", availableCPUs.String())
+
+				orphanedPods = append(orphanedPods, podUID)
+
+				// Clean up the corrupted state to prevent Kubelet sync loop crashes
+				m.policyRemoveContainerByRef(logger, podUID, containerName)
+			}
+		}
+	}
+
+	// 4. Update the manager's internal topology and CPU sets
+	m.topology = newTopology
+	m.allCPUs = availableCPUs
+
+	// 5. Reconcile the shared pool (DefaultCPUSet)
+	// Note: You must add SyncCapacity to the cpumanager.Policy interface!
+	if err := m.policy.SyncCapacity(logger, newTopology, m.state); err != nil {
+		return fmt.Errorf("CPU policy failed to sync capacity: %w", err)
+	}
+
+	// 6. Update the allocatable cache based on the new policy state
+	m.allocatableCPUs = m.policy.GetAllocatableCPUs(m.state)
+
+	if len(orphanedPods) > 0 {
+		return fmt.Errorf("critical hardware vanished for pods: %v", orphanedPods)
+	}
+
+	return nil
+}

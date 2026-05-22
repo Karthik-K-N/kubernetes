@@ -645,3 +645,37 @@ func (m *managerImpl) evictPod(logger klog.Logger, pod *v1.Pod, gracePeriodOverr
 	}
 	return true
 }
+
+// SynchronizeThresholds updates internal threshold byte values when the node capacity changes.
+func (m *managerImpl) SynchronizeThresholds(currentCapacity v1.ResourceList) error {
+	m.Lock()
+	defer m.Unlock()
+
+	klog.InfoS("Reconfiguring eviction thresholds due to node capacity change")
+
+	// Pull the raw memory capacity in bytes
+	memCapacity, ok := currentCapacity[v1.ResourceMemory]
+	if !ok || memCapacity.IsZero() {
+		return fmt.Errorf("failed to sync eviction thresholds: memory capacity missing or zero")
+	}
+
+	// Recalculate absolute values from percentage-based thresholds
+	newThresholds := make([]evictionapi.Threshold, len(m.config.Thresholds))
+	for i, t := range m.config.Thresholds {
+		if t.Value.Percentage > 0 {
+			// Convert percentage directly against the updated raw memory capacity bytes
+			absoluteValue := int64(float64(memCapacity.Value()) * float64(t.Value.Percentage))
+			t.Value.Quantity = resource.NewQuantity(absoluteValue, resource.BinarySI)
+		}
+		newThresholds[i] = t
+	}
+	
+	// Update the config thresholds with the new calculated values
+	m.config.Thresholds = newThresholds
+	
+	// Mark that thresholds were updated so they will be re-evaluated on next synchronize cycle
+	m.thresholdsLastUpdated = m.clock.Now()
+
+	klog.InfoS("Successfully updated absolute eviction thresholds for revised capacity")
+	return nil
+}

@@ -8,7 +8,7 @@ you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
     http://www.apache.org/licenses/LICENSE-2.0
-
+a
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"strings"
 	"sync"
 	"time"
 
@@ -139,6 +140,8 @@ type containerManagerImpl struct {
 	kubeClient clientset.Interface
 	// resourceUpdates is a channel that provides resource updates.
 	resourceUpdates chan resourceupdates.Update
+	// Channel to signal capacity changes to the main Kubelet loop
+	nodeCapacityUpdateCh chan struct{}
 }
 
 type features struct {
@@ -283,16 +286,17 @@ func NewContainerManager(ctx context.Context, mountUtil mount.Interface, cadviso
 	}
 
 	cm := &containerManagerImpl{
-		cadvisorInterface:   cadvisorInterface,
-		mountUtil:           mountUtil,
-		NodeConfig:          nodeConfig,
-		subsystems:          subsystems,
-		cgroupManager:       cgroupManager,
-		capacity:            capacity,
-		internalCapacity:    internalCapacity,
-		cgroupRoot:          cgroupRoot,
-		recorder:            recorder,
-		qosContainerManager: qosContainerManager,
+		cadvisorInterface:    cadvisorInterface,
+		mountUtil:            mountUtil,
+		NodeConfig:           nodeConfig,
+		subsystems:           subsystems,
+		cgroupManager:        cgroupManager,
+		capacity:             capacity,
+		internalCapacity:     internalCapacity,
+		cgroupRoot:           cgroupRoot,
+		recorder:             recorder,
+		qosContainerManager:  qosContainerManager,
+		nodeCapacityUpdateCh: make(chan struct{}, 1), // Buffer of 1 to prevent blocking
 	}
 
 	cm.topologyManager, err = topologymanager.NewManager(
@@ -731,6 +735,12 @@ func (cm *containerManagerImpl) Start(ctx context.Context, node *v1.Node,
 		return err
 	}
 
+	// Start the capacity reconciler if the feature gate is enabled.
+	if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.InPlaceNodeResourceResize) {
+		logger.Info("Starting dynamic node capacity reconciler")
+		go cm.capacityReconciler(ctx)
+	}
+
 	return nil
 }
 
@@ -1147,4 +1157,161 @@ func (cm *containerManagerImpl) UpdateAllocatedResourcesStatus(pod *v1.Pod, stat
 
 func (cm *containerManagerImpl) Updates() <-chan resourceupdates.Update {
 	return cm.resourceUpdates
+}
+
+// capacityReconciler periodically checks cAdvisor for changes in the underlying node capacity.
+func (cm *containerManagerImpl) capacityReconciler(ctx context.Context) {
+	logger := klog.FromContext(ctx)
+
+	// Check for capacity updates every 10 seconds.
+	// This interval can be adjusted or moved to NodeConfig.
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Stopping capacity reconciler")
+			return
+		case <-ticker.C:
+			cm.syncMachineCapacity(logger)
+		}
+	}
+}
+
+// syncMachineCapacity fetches the latest MachineInfo and triggers sub-manager
+// reconciliation if a capacity change is detected.
+func (cm *containerManagerImpl) syncMachineCapacity(logger klog.Logger) {
+	startTime := time.Now()
+
+	machineInfo, err := cm.cadvisorInterface.MachineInfo()
+	if err != nil {
+		logger.Error(err, "Failed to get machine info for capacity reconciliation")
+		metrics.NodeResizeErrorsTotal.WithLabelValues("cadvisor_fetch").Inc()
+		return
+	}
+
+	newCapacity := cadvisor.CapacityFromMachineInfo(machineInfo)
+
+	// Track specific changes to properly label our metrics
+	type resourceChange struct {
+		resourceName string
+		direction    string
+	}
+	var changes []resourceChange
+
+	cm.Lock()
+	// 1. Check if any resources increased or their values changed
+	for k, newVal := range newCapacity {
+		oldVal, exists := cm.capacity[k]
+		if !exists {
+			changes = append(changes, resourceChange{string(k), "increase"})
+			continue
+		}
+		cmp := oldVal.Cmp(newVal)
+		if cmp < 0 {
+			changes = append(changes, resourceChange{string(k), "increase"})
+		} else if cmp > 0 {
+			changes = append(changes, resourceChange{string(k), "decrease"})
+		}
+	}
+
+	// 2. Check if any resources were completely removed (hot-unplug)
+	for k := range cm.capacity {
+		// ALLOWLIST: We only want to trigger hot-unplug alerts for base hardware.
+		// Ignore storage, PIDs, pod limits, and extended resources (like GPUs).
+		isBaseHardware := k == v1.ResourceCPU ||
+			k == v1.ResourceMemory ||
+			strings.HasPrefix(string(k), v1.ResourceHugePagesPrefix)
+
+		if !isBaseHardware {
+			continue
+		}
+
+		if _, exists := newCapacity[k]; !exists {
+			changes = append(changes, resourceChange{string(k), "decrease"})
+		}
+	}
+
+	if len(changes) == 0 {
+		cm.Unlock()
+		return
+	}
+
+	logger.Info("Node capacity change detected", "oldCapacity", cm.capacity, "newCapacity", newCapacity)
+
+	// Update local capacity cache
+	for k, v := range newCapacity {
+		cm.capacity[k] = v
+		cm.internalCapacity[k] = v
+	}
+
+	// Remove deleted resource from cache.
+	for _, change := range changes {
+		if change.direction == "decrease" {
+			resourceName := v1.ResourceName(change.resourceName)
+			if _, exists := newCapacity[resourceName]; !exists {
+				delete(cm.capacity, resourceName)
+				delete(cm.internalCapacity, resourceName)
+			}
+		}
+	}
+
+	// Recalculate PID limits if necessary
+	pidlimits, err := pidlimit.Stats()
+	if err == nil && pidlimits != nil && pidlimits.MaxPID != nil {
+		cm.internalCapacity[pidlimit.PIDs] = *resource.NewQuantity(int64(*pidlimits.MaxPID), resource.DecimalSI)
+	}
+	cm.Unlock()
+
+	// 3. Delegate to sub-managers
+	if resizer, ok := cm.cpuManager.(ResourceResizer); ok {
+		if err := resizer.SyncCapacity(machineInfo); err != nil {
+			logger.Error(err, "CPU Manager failed to sync capacity")
+			metrics.NodeResizeErrorsTotal.WithLabelValues("cpu_manager_sync").Inc()
+		} else {
+			logger.V(2).Info("CPU Manager successfully synced new capacity")
+		}
+	}
+
+	if resizer, ok := cm.memoryManager.(ResourceResizer); ok {
+		if err := resizer.SyncCapacity(machineInfo); err != nil {
+			logger.Error(err, "Memory Manager failed to sync capacity")
+			metrics.NodeResizeErrorsTotal.WithLabelValues("memory_manager_sync").Inc()
+		} else {
+			logger.V(2).Info("Memory Manager successfully synced new capacity")
+		}
+	}
+
+	// 4. Update the Node Allocatable and QoS cgroup bounds on the host filesystem.
+	logger.Info("Updating top-level Node Allocatable and QoS cgroup limits")
+	if err := cm.enforceNodeAllocatableCgroups(logger); err != nil {
+		logger.Error(err, "Failed to update top-level kubepods cgroup limits during resize")
+		metrics.NodeResizeErrorsTotal.WithLabelValues("cgroup_update_kubepods").Inc()
+	}
+
+	if err := cm.UpdateQOSCgroups(logger); err != nil {
+		logger.Error(err, "Failed to update QoS cgroup limits during resize")
+		metrics.NodeResizeErrorsTotal.WithLabelValues("cgroup_update_qos").Inc()
+	}
+
+	// 5. Record successful metrics
+	duration := time.Since(startTime).Seconds()
+	for _, change := range changes {
+		metrics.NodeResizeRequestsTotal.WithLabelValues(change.direction, change.resourceName).Inc()
+		metrics.NodeResizeReconciliationDuration.WithLabelValues(change.direction, change.resourceName).Observe(duration)
+	}
+
+	// 6. Signal the Kubelet to update the NodeStatus immediately
+	select {
+	case cm.nodeCapacityUpdateCh <- struct{}{}:
+		logger.V(2).Info("Signaled Kubelet to update node status with new capacity")
+	default:
+		// If the buffer is full, a signal is already pending, so we don't need to block.
+		logger.V(4).Info("Node capacity update signal already pending")
+	}
+}
+
+func (cm *containerManagerImpl) NodeCapacityUpdates() <-chan struct{} {
+	return cm.nodeCapacityUpdateCh
 }

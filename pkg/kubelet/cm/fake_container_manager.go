@@ -288,6 +288,13 @@ func (cm *FakeContainerManager) Updates() <-chan resourceupdates.Update {
 	return nil
 }
 
+func (cm *FakeContainerManager) NodeCapacityUpdates() <-chan struct{} {
+	cm.Lock()
+	defer cm.Unlock()
+	cm.CalledFunctions = append(cm.CalledFunctions, "NodeCapacityUpdates")
+	return nil
+}
+
 func (cm *FakeContainerManager) PodHasExclusiveCPUs(pod *v1.Pod) bool {
 	return false
 }
